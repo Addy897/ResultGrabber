@@ -14,8 +14,11 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 import easyocr
-reader = easyocr.Reader(['en'])
-
+import os
+reader =None
+def initReader():
+    global reader
+    reader = easyocr.Reader(['en'])
 def intc(value):
     try:
         return int(value)
@@ -147,10 +150,12 @@ def analysis(fname,students,col):
     wb_obj.save(fname)
 
 
-def fetch(l,url):
+def fetch(l,url,cancel,show):
     students=[]
     opt = webdriver.ChromeOptions()
-    opt._binary_location=r"C:\Users\adity\Downloads\chromedriver-win64\chrmoedriver.exe"
+    opt.add_argument("--window-size=1051,798")
+    if(not show.get()):
+        opt.add_argument("--headless")
     opt.set_capability('unhandledPromptBehavior', 'accept')
     #proxy = FreeProxy().get()
     #opt.add_argument('--proxy-server='+proxy)
@@ -160,8 +165,14 @@ def fetch(l,url):
         for u in range(s,n+1):
             fetched = False
             logged_in=False
+            if cancel and cancel.is_set():
+                driver.quit()
+                return students
             while not fetched:
                 if(not logged_in):
+                    if cancel and cancel.is_set():
+                        driver.quit()
+                        return students
                     try:
                         usn = f'{ryb}{u:03d}'
                         driver.get(url)
@@ -172,9 +183,11 @@ def fetch(l,url):
                         img = cv2.threshold(img, 0, 255,  cv2.THRESH_OTSU)[1]
                         img = cv2.threshold(img, 250, 255, cv2.THRESH_BINARY)[1]
                         img = img[407:547, 607:845]
+                        cv2.imwrite('captcha.png',img)
                         cv2.waitKey(0)
-                        cv2.imwrite("captcha.png",img)
                         try:
+                            if(not reader):
+                                exit()
                             code  = reader.readtext(img)[0][1]
                         except IndexError:
                             continue
@@ -248,24 +261,8 @@ def get_subject_marks(student, subject_code):
         return subject_data['SEE'], subject_data['CIE'], subject_data['Total'], subject_data['Result']
     else:
         return None, None, None, None
-def extract_segments(text):
-        pattern = r'^(\d)([A-Z]{2})(\d{2})([A-Z]{2})(\d{3})$'
-        match = re.match(pattern, text)
-        if match:
-            try:
-                region = match.group(1)
-                region_char = match.group(2)
-                year = int(match.group(3))
-                branch = match.group(4)
-                usn_no = int(match.group(5))
 
-                return (region, region_char, year, branch, usn_no)
-            except:
-                return None
-
-        else:
-            return None
-def dump(fname, students):
+def dump(fname, students,analyize=True):
     data = []
     for student in students:
         student_name = student['Student Name']
@@ -282,8 +279,13 @@ def dump(fname, students):
     for subject_code in students[0]['marks']:
         column_names.extend([subject_code + '_SEE', subject_code + '_CIE', subject_code + '_Total', subject_code + '_Result'])
     df = pd.DataFrame(data, columns=column_names)
+    if(not os.path.isdir('./output')):
+        os.mkdir("output")
     try:
-        df.to_excel(fname, index=False)
+        df.to_excel(f"output/{fname}", index=False)
     except ValueError:
-        df.to_excel(f"{fname}.xlsx",index=False)
+        fname=f"{fname}.xlsx"
+        df.to_excel(f"output/{fname}",index=False)
+    if(not analyize):
+        return
     analysis(fname,len(students)+1,students[0]['marks'])
