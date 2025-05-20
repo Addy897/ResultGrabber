@@ -1,0 +1,1 @@
+.\env\Scripts\activate && .\env\Scripts\python.exe gui.py

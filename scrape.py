@@ -15,6 +15,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 import easyocr
 import os
+
+from wrt import export_marksheet
 reader =None
 def initReader():
     global reader
@@ -53,12 +55,12 @@ def swqa(sheet_obj:openpyxl.worksheet.worksheet.Worksheet,col):
             cellP.value=intc(cellP.value)
             cellF.value=intc(cellF.value)
             cell1.value+=1
-            cell2.value+=1
+            cell2.value+=cell_obj.value!="NC"
             cellP.value+=cell_obj.value=="P"
             cellA.value+=cell_obj.value=="A"
             cell1.value-=cell_obj.value=="A"
             cellF.value+=cell_obj.value=="F" or cell_obj.value=="X"
-            per=(cellP.value/cell2.value)*100
+            per=(cellP.value/(cell2.value if cell2.value!=0 else 1))*100
             cellPer.value=float(f"{per:0.2f}")
             k+=1
 def swqal(sheet_obj:openpyxl.worksheet.worksheet.Worksheet,col,students_row):
@@ -176,14 +178,17 @@ def fetch(l,url,cancel,show):
                     try:
                         usn = f'{ryb}{u:03d}'
                         driver.get(url)
-                        driver.save_screenshot('captcha.png')
+                       # driver.save_screenshot('captcha.png')
+                        body_panel=driver.find_element(By.ID,"raj")
+                        img_element = body_panel.find_element(By.TAG_NAME, "img")
+                        img_element.screenshot("captcha.png")
+
                         img = cv2.imread("captcha.png")
                         img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                         img = cv2.medianBlur(img, 3)
                         img = cv2.threshold(img, 0, 255,  cv2.THRESH_OTSU)[1]
                         img = cv2.threshold(img, 250, 255, cv2.THRESH_BINARY)[1]
-                        img = img[407:547, 607:845]
-                        cv2.imwrite('captcha.png',img)
+
                         cv2.waitKey(0)
                         try:
                             if(not reader):
@@ -260,9 +265,9 @@ def get_subject_marks(student, subject_code):
     if subject_data:
         return subject_data['SEE'], subject_data['CIE'], subject_data['Total'], subject_data['Result']
     else:
-        return None, None, None, None
+        return "NC", "NC", "NC", "NC"
 
-def dump(fname, students,analyize=True):
+def dump_old(fname, students,analyize=True):
     data = []
     for student in students:
         student_name = student['Student Name']
@@ -281,11 +286,47 @@ def dump(fname, students,analyize=True):
     df = pd.DataFrame(data, columns=column_names)
     if(not os.path.isdir('./output')):
         os.mkdir("output")
+    os.chdir("output")
     try:
-        df.to_excel(f"output/{fname}", index=False)
+        df.to_excel(f"{fname}", index=False)
     except ValueError:
         fname=f"{fname}.xlsx"
-        df.to_excel(f"output/{fname}",index=False)
+        df.to_excel(f"{fname}",index=False)
     if(not analyize):
+        os.chdir("..")
         return
     analysis(fname,len(students)+1,students[0]['marks'])
+    os.chdir("..")
+def dump(fname, students, analyze=True):
+        all_subject_codes = set()
+        for student in students:
+            all_subject_codes.update(student['marks'].keys())
+
+        data = []
+        for student in students:
+            row = [student.get('Student Name', ''), student.get('University Seat Number', '')]
+            for subject_code in all_subject_codes:
+                see, cie, total, result = get_subject_marks(student, subject_code)
+                row.extend([see, cie, total, result])
+            data.append(row)
+
+        # Prepare column headers
+        column_names = ['Student Name', 'USN']
+        for subject_code in all_subject_codes:
+            column_names.extend([
+                f"{subject_code}_SEE",
+                f"{subject_code}_CIE",
+                f"{subject_code}_Total",
+                f"{subject_code}_Result"
+            ])
+
+        # Create DataFrame
+        df = pd.DataFrame(data, columns=column_names)
+
+        # Save to Excel
+        if not os.path.isdir('./output'):
+            os.mkdir("output")
+        output_path = os.path.join("output", f"{fname}.xlsx")
+        df.to_excel(output_path, index=False)
+        if analyze:
+            analysis(output_path, len(students) + 1, list(all_subject_codes))
