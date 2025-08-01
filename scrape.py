@@ -1,4 +1,3 @@
-from tkinter import TRUE
 import cv2
 import time
 from PIL import Image
@@ -6,7 +5,7 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.common.exceptions import UnexpectedAlertPresentException
 import pandas as pd
-#from fp.fp import FreeProxy
+from fp.fp import FreeProxy
 import openpyxl,re
 import openpyxl.worksheet
 import openpyxl.worksheet.worksheet
@@ -43,24 +42,23 @@ def swqa(sheet_obj:openpyxl.worksheet.worksheet.Worksheet,col):
         k=0
         for j in range(6,column+1,4):
             cell_obj = sheet_obj.cell(row=i, column=j)
-            cell1 = sheet_obj.cell(row=wrow+1+k, column=4)
-            cell2 = sheet_obj.cell(row=wrow+1+k, column=3)
+            cell_appeared = sheet_obj.cell(row=wrow+1+k, column=4)
+            cell_total = sheet_obj.cell(row=wrow+1+k, column=3)
             cellP = sheet_obj.cell(row=wrow+1+k, column=6)
             cellA = sheet_obj.cell(row=wrow+1+k, column=5)
             cellF = sheet_obj.cell(row=wrow+1+k, column=7)
             cellPer = sheet_obj.cell(row=wrow+1+k, column=8)
-            cell1.value=intc(cell1.value)
-            cell2.value=intc(cell2.value)
+            cell_appeared.value=intc(cell_appeared.value)
+            cell_total.value=intc(cell_total.value)
             cellA.value=intc(cellA.value)
             cellP.value=intc(cellP.value)
             cellF.value=intc(cellF.value)
-            cell1.value+=1
-            cell2.value+=cell_obj.value!="NC"
+            cell_appeared.value+=cell_obj.value!="NC" and cell_obj.value!="A"
+            cell_total.value+=cell_obj.value!="NC"
             cellP.value+=cell_obj.value=="P"
             cellA.value+=cell_obj.value=="A"
-            cell1.value-=cell_obj.value=="A"
             cellF.value+=cell_obj.value=="F" or cell_obj.value=="X"
-            per=(cellP.value/(cell2.value if cell2.value!=0 else 1))*100
+            per=(cellP.value/(cell_total.value if cell_total.value!=0 else 1))*100
             cellPer.value=float(f"{per:0.2f}")
             k+=1
 def swqal(sheet_obj:openpyxl.worksheet.worksheet.Worksheet,col,students_row):
@@ -124,11 +122,12 @@ def rwqa(sheet_obj:openpyxl.worksheet.worksheet.Worksheet,students:int):
                 F=1
                 P=0
 
+        cell4=sheet_obj.cell(row=wrow+1,column=2)
         cell=sheet_obj.cell(row=wrow+1,column=3)
         cell1=sheet_obj.cell(row=wrow+1,column=4)
         cell2=sheet_obj.cell(row=wrow+1,column=5)
         cell3=sheet_obj.cell(row=wrow+1,column=6)
-        cell4=sheet_obj.cell(row=wrow+1,column=2)
+        
         cell.value=intc(cell.value)
         cell1.value=intc(cell1.value)
         cell2.value=intc(cell2.value)
@@ -152,15 +151,15 @@ def analysis(fname,students,col):
     wb_obj.save(fname)
 
 
-def fetch(l,url,cancel,show):
+def fetch(l,url,cancel,show,use_proxy=None):
     students=[]
     opt = webdriver.ChromeOptions()
-    opt.add_argument("--window-size=1051,798")
-    if(not show.get()):
+    if(show.get()):
         opt.add_argument("--headless")
     opt.set_capability('unhandledPromptBehavior', 'accept')
-    #proxy = FreeProxy().get()
-    #opt.add_argument('--proxy-server='+proxy)
+    if use_proxy and use_proxy.get():
+        proxy = FreeProxy().get()
+        opt.add_argument('--proxy-server='+proxy)
     driver = webdriver.Chrome(options=opt)
 
     for n,ryb,s in l:
@@ -220,11 +219,23 @@ def fetch(l,url,cancel,show):
                     except Exception as e:
                         print(f"[-] Not logged in {e}")
                 else:
-                    driver.refresh()
+                    
+                    
                     source=driver.page_source
                     try:
                         soup = BeautifulSoup(source)
                         std = {}
+                        sem_div = soup.find("div", text=re.compile(r"Semester\s*:", re.IGNORECASE))
+                        if sem_div:
+                            sem_text = sem_div.get_text(strip=True)         
+                            # Split on “:” and convert to int
+                            try:
+                                sem_value = int(sem_text.split(":")[-1].strip())
+                            except:
+                                sem_value = 0
+                        else:
+                            sem_value = 0
+
                         table = soup.find('table')
                         rows = table.find_all('tr')
                         for row in rows:
@@ -251,9 +262,14 @@ def fetch(l,url,cancel,show):
                                 marks[subject_code]=subject_info
 
                         std['marks']=marks
+                        std['semester']=sem_value
                         students.append(std)
 
                     except Exception as e:
+                        get_url = driver.current_url
+                        if(get_url==url):
+                            logged_in=False
+                        driver.refresh()
                         continue
                     fetched=True
 
@@ -267,36 +283,6 @@ def get_subject_marks(student, subject_code):
     else:
         return "NC", "NC", "NC", "NC"
 
-def dump_old(fname, students,analyize=True):
-    data = []
-    for student in students:
-        student_name = student['Student Name']
-        usn = student['University Seat Number']
-
-        subject_marks = []
-        for subject_code in student['marks']:
-            see, cie, total, result = get_subject_marks(student, subject_code)
-            subject_marks.extend([see, cie, total, result])
-
-        data.append([student_name, usn] + subject_marks)
-
-    column_names = ['Student Name', 'USN']
-    for subject_code in students[0]['marks']:
-        column_names.extend([subject_code + '_SEE', subject_code + '_CIE', subject_code + '_Total', subject_code + '_Result'])
-    df = pd.DataFrame(data, columns=column_names)
-    if(not os.path.isdir('./output')):
-        os.mkdir("output")
-    os.chdir("output")
-    try:
-        df.to_excel(f"{fname}", index=False)
-    except ValueError:
-        fname=f"{fname}.xlsx"
-        df.to_excel(f"{fname}",index=False)
-    if(not analyize):
-        os.chdir("..")
-        return
-    analysis(fname,len(students)+1,students[0]['marks'])
-    os.chdir("..")
 def dump(fname, students, analyze=True):
         all_subject_codes = set()
         for student in students:
@@ -309,8 +295,6 @@ def dump(fname, students, analyze=True):
                 see, cie, total, result = get_subject_marks(student, subject_code)
                 row.extend([see, cie, total, result])
             data.append(row)
-
-        # Prepare column headers
         column_names = ['Student Name', 'USN']
         for subject_code in all_subject_codes:
             column_names.extend([
