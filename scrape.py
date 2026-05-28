@@ -16,7 +16,6 @@ from selenium.webdriver.support import expected_conditions as EC
 import easyocr
 import os
 
-from wrt import export_marksheet
 reader =None
 def initReader():
     global reader
